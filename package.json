@@ -79,7 +79,7 @@
       "sqlite3"
     ],
     "overrides": {
-      "@types/node": "^20.17.41",
+      "@types/node": "^20.17.46",
       "chokidar": "^4.0.1",
       "esbuild": "^0.24.0",
       "formidable": "3.5.1",
