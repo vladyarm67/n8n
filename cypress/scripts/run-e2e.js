@@ -44,7 +44,7 @@ switch (scenario) {
 		runTests({
 			startCommand: 'start',
 			url: 'http://localhost:5678/favicon.ico',
-			testCommand: 'cypress open'
+			testCommand: 'cypress open',
 		});
 		break;
 	case 'dev':
