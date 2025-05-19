@@ -1,10 +1,18 @@
 import { type INodeParameters, type NodeParameterValueType } from 'n8n-workflow';
 import { defineStore } from 'pinia';
-import { ref, watch } from 'vue';
+import { useLocalStorage } from '@vueuse/core';
 
-interface IAgentRequestStoreState {
+export interface IAgentRequest {
+	query: INodeParameters;
+	toolName?: string;
+}
+
+export interface IAgentRequestStoreState {
 	[workflowId: string]: {
-		[nodeName: string]: INodeParameters;
+		[nodeName: string]: {
+			query: INodeParameters;
+			toolName?: string;
+		};
 	};
 }
 
@@ -12,30 +20,7 @@ const STORAGE_KEY = 'n8n-agent-requests';
 
 export const useAgentRequestStore = defineStore('agentRequest', () => {
 	// State
-	const agentRequests = ref<IAgentRequestStoreState>(loadFromLocalStorage());
-
-	// Load initial state from localStorage
-	function loadFromLocalStorage(): IAgentRequestStoreState {
-		try {
-			const storedData = localStorage.getItem(STORAGE_KEY);
-			return storedData ? JSON.parse(storedData) : {};
-		} catch (error) {
-			return {};
-		}
-	}
-
-	// Save state to localStorage whenever it changes
-	watch(
-		agentRequests,
-		(newValue) => {
-			try {
-				localStorage.setItem(STORAGE_KEY, JSON.stringify(newValue));
-			} catch (error) {
-				console.error('Failed to save agent requests to localStorage:', error);
-			}
-		},
-		{ deep: true },
-	);
+	const agentRequests = useLocalStorage<IAgentRequestStoreState>(STORAGE_KEY, {});
 
 	// Helper function to ensure workflow and node entries exist
 	const ensureWorkflowAndNodeExist = (workflowId: string, nodeId: string): void => {
@@ -44,13 +29,13 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 		}
 
 		if (!agentRequests.value[workflowId][nodeId]) {
-			agentRequests.value[workflowId][nodeId] = {};
+			agentRequests.value[workflowId][nodeId] = { query: {} };
 		}
 	};
 
 	// Getters
 	const getAgentRequests = (workflowId: string, nodeId: string): INodeParameters => {
-		return agentRequests.value[workflowId]?.[nodeId] || {};
+		return agentRequests.value[workflowId]?.[nodeId]?.query || {};
 	};
 
 	const getAgentRequest = (
@@ -58,7 +43,7 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 		nodeId: string,
 		paramName: string,
 	): NodeParameterValueType | undefined => {
-		return agentRequests.value[workflowId]?.[nodeId]?.[paramName];
+		return agentRequests.value[workflowId]?.[nodeId]?.query?.[paramName];
 	};
 
 	// Actions
@@ -72,10 +57,13 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 
 		agentRequests.value[workflowId][nodeId] = {
 			...agentRequests.value[workflowId][nodeId],
-			[paramName]: paramValues,
+			query: {
+				...agentRequests.value[workflowId][nodeId].query,
+				[paramName]: paramValues,
+			},
 		};
 
-		return agentRequests.value[workflowId][nodeId];
+		return agentRequests.value[workflowId][nodeId].query;
 	};
 
 	const addAgentRequests = (workflowId: string, nodeId: string, params: INodeParameters): void => {
@@ -83,13 +71,16 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 
 		agentRequests.value[workflowId][nodeId] = {
 			...agentRequests.value[workflowId][nodeId],
-			...params,
+			query: {
+				...agentRequests.value[workflowId][nodeId].query,
+				...params,
+			},
 		};
 	};
 
 	const clearAgentRequests = (workflowId: string, nodeId: string): void => {
 		if (agentRequests.value[workflowId]) {
-			agentRequests.value[workflowId][nodeId] = {};
+			agentRequests.value[workflowId][nodeId] = { query: {} };
 		}
 	};
 
@@ -103,14 +94,21 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 		}
 	};
 
+	function sanitizeKey(key: string): string {
+		if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+			return `_${key}`;
+		}
+		return key;
+	}
+
 	function parsePath(path: string): string[] {
 		return path.split('.').reduce((acc: string[], part) => {
 			if (part.includes('[')) {
 				const [arrayName, index] = part.split('[');
-				if (arrayName) acc.push(arrayName);
+				if (arrayName) acc.push(sanitizeKey(arrayName));
 				if (index) acc.push(index.replace(']', ''));
 			} else {
-				acc.push(part);
+				acc.push(sanitizeKey(part));
 			}
 			return acc;
 		}, []);
@@ -121,7 +119,7 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 		let current = result;
 
 		for (let i = 0; i < path.length - 1; i++) {
-			const part = path[i];
+			const part = sanitizeKey(path[i]);
 			const nextPart = path[i + 1];
 			const isArrayIndex = nextPart && !isNaN(Number(nextPart));
 
@@ -139,33 +137,29 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 			current = current[part] as INodeParameters;
 		}
 
-		current[path[path.length - 1]] = value;
+		current[sanitizeKey(path[path.length - 1])] = value;
 		return result;
 	}
 
-	// Helper function to deep merge objects
 	function deepMerge(target: INodeParameters, source: INodeParameters): INodeParameters {
 		const result = { ...target };
 
 		for (const key in source) {
+			const sanitizedKey = sanitizeKey(key);
 			if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-				// Recursively merge nested objects
-				result[key] = deepMerge(
-					(result[key] as INodeParameters) || {},
+				result[sanitizedKey] = deepMerge(
+					(result[sanitizedKey] as INodeParameters) || {},
 					source[key] as INodeParameters,
 				);
 			} else if (Array.isArray(source[key])) {
-				// For arrays, merge by index
-				if (Array.isArray(result[key])) {
-					const targetArray = result[key] as NodeParameterValueType[];
+				if (Array.isArray(result[sanitizedKey])) {
+					const targetArray = result[sanitizedKey] as NodeParameterValueType[];
 					const sourceArray = source[key] as NodeParameterValueType[];
 
-					// Ensure target array has enough elements
 					while (targetArray.length < sourceArray.length) {
 						targetArray.push({});
 					}
 
-					// Merge each array item
 					sourceArray.forEach((item, index) => {
 						if (item && typeof item === 'object') {
 							targetArray[index] = deepMerge(
@@ -177,11 +171,10 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 						}
 					});
 				} else {
-					result[key] = source[key];
+					result[sanitizedKey] = source[key];
 				}
 			} else {
-				// For primitive values, use source value
-				result[key] = source[key];
+				result[sanitizedKey] = source[key];
 			}
 		}
 
@@ -189,7 +182,7 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 	}
 
 	const generateAgentRequest = (workflowId: string, nodeId: string): INodeParameters => {
-		const nodeRequests = agentRequests.value[workflowId]?.[nodeId] || {};
+		const nodeRequests = agentRequests.value[workflowId]?.[nodeId]?.query || {};
 
 		return Object.entries(nodeRequests).reduce(
 			(acc, [path, value]) => deepMerge(acc, buildRequestObject(parsePath(path), value)),
