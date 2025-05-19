@@ -31,7 +31,6 @@ export class TestRunRepository extends Repository<TestRun> {
 			},
 		});
 
-		// return testRun;
 		return await this.save(testRun);
 	}
 
