@@ -123,7 +123,7 @@ describe('FromAiParametersModal', () => {
 		workflowsStore.getCurrentWorkflow = vi.fn().mockReturnValue(mockWorkflow);
 		agentRequestStore = useAgentRequestStore();
 		agentRequestStore.clearAgentRequests = vi.fn();
-		agentRequestStore.addAgentRequests = vi.fn();
+		agentRequestStore.setAgentRequestForNode = vi.fn();
 		agentRequestStore.generateAgentRequest = vi.fn();
 		nodeTypesStore = useNodeTypesStore();
 		nodeTypesStore.getNodeParameterOptions = vi.fn().mockResolvedValue(mockTools);
@@ -213,9 +213,11 @@ describe('FromAiParametersModal', () => {
 
 		await userEvent.click(getByTestId('execute-workflow-button'));
 
-		expect(agentRequestStore.addAgentRequests).toHaveBeenCalledWith('test-workflow', 'id1', {
-			'query.testBoolean': true,
-			'query.testParam': 'override',
+		expect(agentRequestStore.setAgentRequestForNode).toHaveBeenCalledWith('test-workflow', 'id1', {
+			query: {
+				testBoolean: true,
+				testParam: 'override',
+			},
 		});
 	});
 
@@ -265,9 +267,11 @@ describe('FromAiParametersModal', () => {
 		);
 		await userEvent.click(getByTestId('execute-workflow-button'));
 
-		expect(agentRequestStore.addAgentRequests).toHaveBeenCalledWith('test-workflow', 'id1', {
-			'query.testBoolean': false,
-			'query.testParam': 'given value',
+		expect(agentRequestStore.setAgentRequestForNode).toHaveBeenCalledWith('test-workflow', 'id1', {
+			query: {
+				testBoolean: false,
+				testParam: 'given value',
+			},
 		});
 	});
 });

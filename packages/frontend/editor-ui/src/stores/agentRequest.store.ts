@@ -1,41 +1,56 @@
 import { type INodeParameters, type NodeParameterValueType } from 'n8n-workflow';
 import { defineStore } from 'pinia';
 import { useLocalStorage } from '@vueuse/core';
+import { LOCAL_STORAGE_AGENT_REQUESTS } from '@/constants';
 
 export interface IAgentRequest {
-	query: INodeParameters;
+	query: INodeParameters | string;
 	toolName?: string;
 }
 
 export interface IAgentRequestStoreState {
 	[workflowId: string]: {
-		[nodeName: string]: {
-			query: INodeParameters;
-			toolName?: string;
-		};
+		[nodeName: string]: IAgentRequest;
 	};
 }
 
-const STORAGE_KEY = 'n8n-agent-requests';
+const validateNodeId = (nodeId: string): string => {
+	if (!nodeId || typeof nodeId !== 'string') {
+		throw new Error('Invalid nodeId');
+	}
+	return nodeId; // No need to sanitize UUIDs as they're already in a safe format
+};
+
+const validateWorkflowId = (workflowId: string): string => {
+	if (!workflowId || typeof workflowId !== 'string') {
+		throw new Error('Invalid workflowId');
+	}
+	return workflowId;
+};
 
 export const useAgentRequestStore = defineStore('agentRequest', () => {
 	// State
-	const agentRequests = useLocalStorage<IAgentRequestStoreState>(STORAGE_KEY, {});
+	const agentRequests = useLocalStorage<IAgentRequestStoreState>(LOCAL_STORAGE_AGENT_REQUESTS, {});
 
 	// Helper function to ensure workflow and node entries exist
 	const ensureWorkflowAndNodeExist = (workflowId: string, nodeId: string): void => {
-		if (!agentRequests.value[workflowId]) {
-			agentRequests.value[workflowId] = {};
+		const safeWorkflowId = validateWorkflowId(workflowId);
+		const safeNodeId = validateNodeId(nodeId);
+
+		if (!agentRequests.value[safeWorkflowId]) {
+			agentRequests.value[safeWorkflowId] = {};
 		}
 
-		if (!agentRequests.value[workflowId][nodeId]) {
-			agentRequests.value[workflowId][nodeId] = { query: {} };
+		if (!agentRequests.value[safeWorkflowId][safeNodeId]) {
+			agentRequests.value[safeWorkflowId][safeNodeId] = { query: {} };
 		}
 	};
 
 	// Getters
-	const getAgentRequests = (workflowId: string, nodeId: string): INodeParameters => {
-		return agentRequests.value[workflowId]?.[nodeId]?.query || {};
+	const getAgentRequests = (workflowId: string, nodeId: string): INodeParameters | string => {
+		const safeWorkflowId = validateWorkflowId(workflowId);
+		const safeNodeId = validateNodeId(nodeId);
+		return agentRequests.value[safeWorkflowId]?.[safeNodeId]?.query || {};
 	};
 
 	const getAgentRequest = (
@@ -43,159 +58,58 @@ export const useAgentRequestStore = defineStore('agentRequest', () => {
 		nodeId: string,
 		paramName: string,
 	): NodeParameterValueType | undefined => {
-		return agentRequests.value[workflowId]?.[nodeId]?.query?.[paramName];
+		const safeWorkflowId = validateWorkflowId(workflowId);
+		const safeNodeId = validateNodeId(nodeId);
+		const query = agentRequests.value[safeWorkflowId]?.[safeNodeId]?.query;
+		if (typeof query === 'string') {
+			return undefined;
+		}
+		return query?.[paramName] as NodeParameterValueType;
 	};
 
-	// Actions
-	const addAgentRequest = (
+	const setAgentRequestForNode = (
 		workflowId: string,
 		nodeId: string,
-		paramName: string,
-		paramValues: NodeParameterValueType,
-	): INodeParameters => {
-		ensureWorkflowAndNodeExist(workflowId, nodeId);
+		request: IAgentRequest,
+	): void => {
+		const safeWorkflowId = validateWorkflowId(workflowId);
+		const safeNodeId = validateNodeId(nodeId);
+		ensureWorkflowAndNodeExist(safeWorkflowId, safeNodeId);
 
-		agentRequests.value[workflowId][nodeId] = {
-			...agentRequests.value[workflowId][nodeId],
-			query: {
-				...agentRequests.value[workflowId][nodeId].query,
-				[paramName]: paramValues,
-			},
-		};
-
-		return agentRequests.value[workflowId][nodeId].query;
-	};
-
-	const addAgentRequests = (workflowId: string, nodeId: string, params: INodeParameters): void => {
-		ensureWorkflowAndNodeExist(workflowId, nodeId);
-
-		agentRequests.value[workflowId][nodeId] = {
-			...agentRequests.value[workflowId][nodeId],
-			query: {
-				...agentRequests.value[workflowId][nodeId].query,
-				...params,
-			},
+		agentRequests.value[safeWorkflowId][safeNodeId] = {
+			...request,
+			query: typeof request.query === 'string' ? request.query : { ...request.query },
 		};
 	};
 
 	const clearAgentRequests = (workflowId: string, nodeId: string): void => {
-		if (agentRequests.value[workflowId]) {
-			agentRequests.value[workflowId][nodeId] = { query: {} };
+		const safeWorkflowId = validateWorkflowId(workflowId);
+		const safeNodeId = validateNodeId(nodeId);
+		if (agentRequests.value[safeWorkflowId]) {
+			agentRequests.value[safeWorkflowId][safeNodeId] = { query: {} };
 		}
 	};
 
 	const clearAllAgentRequests = (workflowId?: string): void => {
 		if (workflowId) {
-			// Clear requests for a specific workflow
-			agentRequests.value[workflowId] = {};
+			const safeWorkflowId = validateWorkflowId(workflowId);
+			agentRequests.value[safeWorkflowId] = {};
 		} else {
-			// Clear all requests
 			agentRequests.value = {};
 		}
 	};
 
-	function sanitizeKey(key: string): string {
-		if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
-			return `_${key}`;
-		}
-		return key;
-	}
-
-	function parsePath(path: string): string[] {
-		return path.split('.').reduce((acc: string[], part) => {
-			if (part.includes('[')) {
-				const [arrayName, index] = part.split('[');
-				if (arrayName) acc.push(sanitizeKey(arrayName));
-				if (index) acc.push(index.replace(']', ''));
-			} else {
-				acc.push(sanitizeKey(part));
-			}
-			return acc;
-		}, []);
-	}
-
-	function buildRequestObject(path: string[], value: NodeParameterValueType): INodeParameters {
-		const result: INodeParameters = {};
-		let current = result;
-
-		for (let i = 0; i < path.length - 1; i++) {
-			const part = sanitizeKey(path[i]);
-			const nextPart = path[i + 1];
-			const isArrayIndex = nextPart && !isNaN(Number(nextPart));
-
-			if (isArrayIndex) {
-				if (!current[part]) {
-					current[part] = [];
-				}
-				while ((current[part] as NodeParameterValueType[]).length <= Number(nextPart)) {
-					(current[part] as NodeParameterValueType[]).push({});
-				}
-			} else if (!current[part]) {
-				current[part] = {};
-			}
-
-			current = current[part] as INodeParameters;
-		}
-
-		current[sanitizeKey(path[path.length - 1])] = value;
-		return result;
-	}
-
-	function deepMerge(target: INodeParameters, source: INodeParameters): INodeParameters {
-		const result = { ...target };
-
-		for (const key in source) {
-			const sanitizedKey = sanitizeKey(key);
-			if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-				result[sanitizedKey] = deepMerge(
-					(result[sanitizedKey] as INodeParameters) || {},
-					source[key] as INodeParameters,
-				);
-			} else if (Array.isArray(source[key])) {
-				if (Array.isArray(result[sanitizedKey])) {
-					const targetArray = result[sanitizedKey] as NodeParameterValueType[];
-					const sourceArray = source[key] as NodeParameterValueType[];
-
-					while (targetArray.length < sourceArray.length) {
-						targetArray.push({});
-					}
-
-					sourceArray.forEach((item, index) => {
-						if (item && typeof item === 'object') {
-							targetArray[index] = deepMerge(
-								(targetArray[index] as INodeParameters) || {},
-								item as INodeParameters,
-							) as NodeParameterValueType;
-						} else {
-							targetArray[index] = item;
-						}
-					});
-				} else {
-					result[sanitizedKey] = source[key];
-				}
-			} else {
-				result[sanitizedKey] = source[key];
-			}
-		}
-
-		return result;
-	}
-
-	const generateAgentRequest = (workflowId: string, nodeId: string): INodeParameters => {
-		const nodeRequests = agentRequests.value[workflowId]?.[nodeId]?.query || {};
-
-		return Object.entries(nodeRequests).reduce(
-			(acc, [path, value]) => deepMerge(acc, buildRequestObject(parsePath(path), value)),
-			{} as INodeParameters,
-		);
+	const generateAgentRequest = (workflowId: string, nodeId: string): IAgentRequest => {
+		const safeWorkflowId = validateWorkflowId(workflowId);
+		const safeNodeId = validateNodeId(nodeId);
+		return agentRequests.value[safeWorkflowId][safeNodeId];
 	};
 
 	return {
 		agentRequests,
 		getAgentRequests,
 		getAgentRequest,
-		addAgentRequest,
-		addAgentRequests,
+		setAgentRequestForNode,
 		clearAgentRequests,
 		clearAllAgentRequests,
 		generateAgentRequest,

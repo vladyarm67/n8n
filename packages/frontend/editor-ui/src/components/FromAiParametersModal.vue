@@ -2,7 +2,7 @@
 import { useI18n } from '@/composables/useI18n';
 import { useRunWorkflow } from '@/composables/useRunWorkflow';
 import { FROM_AI_PARAMETERS_MODAL_KEY, AI_MCP_TOOL_NODE_TYPE } from '@/constants';
-import { useAgentRequestStore } from '@/stores/agentRequest.store';
+import { useAgentRequestStore, type IAgentRequest } from '@/stores/agentRequest.store';
 import { useWorkflowsStore } from '@/stores/workflows.store';
 import { createEventBus } from '@n8n/utils/event-bus';
 import {
@@ -166,11 +166,8 @@ watch(
 			const inputQuery = inputOverrides?.query as IDataObject;
 			const initialValue = inputQuery?.[value.key]
 				? inputQuery[value.key]
-				: (agentRequestStore.getAgentRequest(
-						workflowsStore.workflowId,
-						newNode.id,
-						'query.' + value.key,
-					) ?? mapTypes[type]?.defaultValue);
+				: (agentRequestStore.getAgentRequest(workflowsStore.workflowId, newNode.id, value.key) ??
+					mapTypes[type]?.defaultValue);
 
 			result.push({
 				name: 'query.' + value.key,
@@ -216,7 +213,24 @@ const onExecute = async () => {
 	const inputValues = inputs.value?.getValues() ?? {};
 
 	agentRequestStore.clearAgentRequests(workflowsStore.workflowId, node.value.id);
-	agentRequestStore.addAgentRequests(workflowsStore.workflowId, node.value.id, inputValues);
+
+	// Structure the input values as IAgentRequest
+	const agentRequest: IAgentRequest = {
+		query: {},
+		toolName: inputValues.toolName as string,
+	};
+
+	// Move all query.* fields to query object
+	Object.entries(inputValues).forEach(([key, value]) => {
+		if (key === 'query') {
+			agentRequest.query = value as string;
+		} else if (key.startsWith('query.') && 'string' !== typeof agentRequest.query) {
+			const queryKey = key.replace('query.', '');
+			agentRequest.query[queryKey] = value;
+		}
+	});
+
+	agentRequestStore.setAgentRequestForNode(workflowsStore.workflowId, node.value.id, agentRequest);
 
 	const telemetryPayload = {
 		node_type: node.value.type,
